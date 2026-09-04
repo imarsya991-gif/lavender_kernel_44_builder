@@ -1,4 +1,4 @@
-name: 🛠️ SONY KERNEL XZ2/XZ3 4.9
+name: 🛠️ SAN KERNEL XZ2/XZ3 4.9
 
 on:
   workflow_dispatch:
@@ -317,7 +317,7 @@ jobs:
         id: img
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" | head -n1)
+          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n1)
 
           if [ -z "$IMAGE" ]; then
             echo "❌ Kernel file not found!"
