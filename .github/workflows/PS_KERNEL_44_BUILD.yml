@@ -1,4 +1,4 @@
-Name: 🛠️ SAN KERNEL SONY XZ2/XZ3 4.9
+name: 🛠️ SAN KERNEL SONY XZ2/XZ3 4.9
 
 on:
   workflow_dispatch:
