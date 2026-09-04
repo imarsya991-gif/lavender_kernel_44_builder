@@ -1,195 +1,354 @@
-
-name: TAMA KSU
+name: 🛠️ SAN KERNEL XZ2/XZ3 4.9
 
 on:
   workflow_dispatch:
+    inputs:
+      KERNEL_BRANCH:
+        description: '🌿 Select Kernel Branch'
+        required: true
+        default: 'bpf'
+        type: choice
+        options:
+          - bpf
+          - test
+      DISPLAY_BRANCH_NAME:
+        description: '🏷️ Display Branch Name'
+        required: true
+        default: false
+        type: boolean
+      LOCALVERSION:
+        description: '🏷️ Custom Kernel Name (e.g., MyKernel-v1.0)'
+        required: false
+        type: string
+      LOCALVERSION_AUTO:
+        description: '🔧 Enable Localversion Auto'
+        required: true
+        default: false
+        type: boolean
+      DEFAULT_HOSTNAME:
+        description: '💻 Kernel Hostname (e.g., sony@apollo)'
+        required: true
+        default: sony@apollo
+        type: string
+      BUILD_USER:
+        description: '👤 Build Username (e.g., sony)'
+        required: true
+        default: sony
+        type: string
+      BUILD_HOST:
+        description: '🖥️ Build Hostname (e.g., apollo)'
+        required: true
+        default: apollo
+        type: string
+      QTI_HAPTICS:
+        description: '📳 Include QTI Haptics Support'
+        required: true
+        default: false
+        type: boolean
+      BUILD_NEWCAM:
+        description: '📷 Use Newcam Build'
+        required: true
+        default: false
+        type: boolean
+      INJECT_KSU:
+        description: '🦊 Inject KernelSU'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  KERNEL_DIR: kernel_source
+  CLANG_DIR: clang
+  OUT_DIR: out
+  ARCH: arm64
+  SUBARCH: arm64
+  KERNEL_URL: https://github.com/imarsya991-gif/Kernel_SonyXZ2-3.git
+  DEFCONFIG: tama_apollo_dcm_defconfig
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-
-    strategy:
-      fail-fast: false
-      matrix:
-        codename:
-          - akari
-          - akatsuki
-          - apollo
-          - aurora
-          - akari_kddi
-          - akatsuki_kddi
-          - apollo_dcm
-          - aurora_kddi
-
-    env:
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
-      KERNEL_VER: Sony
-      KERNEL_URL: https://github.com/imarsya991-gif/Kernel_SonyXZ2-3.git
-      KERNEL_BRANCH: bpf
-      CLANG_URL: https://gitlab.com/kei-space/clang/r498229b.git
-      CLANG_BRANCH: master
-      KSU_URL: https://raw.githubusercontent.com/backslashxx/KernelSU/master/kernel/setup.sh
-      KSU_BRANCH: master
-      ANYKERNEL_URL: https://github.com/Sorayukii/AnyKernel3
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
 
     steps:
-    - name: Checkout workflow repo
-      uses: actions/checkout@v4
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison ca-certificates curl flex gcc git libc6-dev libssl-dev \
-          openssl python-is-python3 ssh wget zip sudo make clang \
-          gcc-arm-linux-gnueabi software-properties-common build-essential \
-          libarchive-tools gcc-aarch64-linux-gnu libssl-dev libffi-dev \
-          libncurses5-dev zlib1g zlib1g-dev libreadline-dev libbz2-dev \
-          libsqlite3-dev make gcc pigz python3 cpio lld
+      - name: ⏱️ Record Build Start Time
+        run: echo "BUILD_START_TIME=$(date +%s)" >> $GITHUB_ENV
 
-    - name: Clone kernel source
-      run: |
-        git clone --depth=1 "$KERNEL_URL" -b "$KERNEL_BRANCH" kernel
-        cd kernel
-        echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+      - name: 📥 Clone Kernel Source
+        run: |
+          rm -rf "${{ env.KERNEL_DIR }}"
+          git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ env.KERNEL_URL }}" "${{ env.KERNEL_DIR }}"
+      - name: 🔠 Configure Kernel Name String
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          CLEAN_INPUT=$(echo "${{ inputs.LOCALVERSION }}" | sed 's/^-//')
+          if [ -n "$CLEAN_INPUT" ]; then
+            BASE_NAME="$CLEAN_INPUT"
+          else
+            BASE_NAME=""
+          fi
+          if [ "${{ inputs.DISPLAY_BRANCH_NAME }}" == "true" ]; then
+            if [ -n "$BASE_NAME" ]; then
+              FINAL_LOCAL="-${{ inputs.KERNEL_BRANCH }}-${BASE_NAME}"
+            else
+              FINAL_LOCAL="-${{ inputs.KERNEL_BRANCH }}"
+            fi
+          else
+            if [ -n "$BASE_NAME" ]; then
+              FINAL_LOCAL="-${BASE_NAME}"
+            else
+              FINAL_LOCAL=""
+            fi
+          fi
+          echo "✅ Kernel string set to: $FINAL_LOCAL"
+          echo "KERNEL_NAME_STRING=$FINAL_LOCAL" >> $GITHUB_ENV
+      - name: 📖 Read Kernel Version
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          KVER_MAJOR=$(grep -m1 '^VERSION =' Makefile | tr -d ' ' | cut -d'=' -f2)
+          KVER_PATCH=$(grep -m1 '^PATCHLEVEL =' Makefile | tr -d ' ' | cut -d'=' -f2)
+          KVER_SUB=$(grep -m1 '^SUBLEVEL =' Makefile | tr -d ' ' | cut -d'=' -f2)
+          FULL_KVER="${KVER_MAJOR}.${KVER_PATCH}.${KVER_SUB}"
+          echo "KERNEL_VERSION=$FULL_KVER" >> $GITHUB_ENV
+          echo "✅ Detected Kernel Version: $FULL_KVER"
+      - name: 📦 Install Build Dependencies
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+            echo "Waiting for apt process to finish..."
+            sleep 5
+          done
+          for i in 1 2 3; do
+            sudo apt-get update -yq && break
+            echo "apt update failed, attempt $i, retrying..."
+            sleep 10
+          done
+          sudo apt-get install -yq --no-install-recommends \
+            -o Acquire::Retries=3 \
+            bc bison libssl-dev libelf-dev build-essential python3 python3-pip curl git zip unzip wget ccache libncurses-dev rsync gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi xz-utils
+      - name: ⚡ Setup Compiler Cache
+        run: |
+          ccache --max-size=2G
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+      - name: 💾 Restore Compiler Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-eas-${{ env.DEFCONFIG }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-eas-${{ env.DEFCONFIG }}-
+      - name: 🦊 Setup KernelSU
+        if: ${{ inputs.INJECT_KSU == true }}
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
+          KSU_RELEASE_JSON=$(curl -s https://api.github.com/repos/backslashxx/KernelSU/releases/latest)
+          KSU_TAG=$(echo "$KSU_RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | cut -d'"' -f4)
+          if [ -n "$KSU_TAG" ]; then
+            KSU_URL="https://github.com/backslashxx/KernelSU/releases/tag/$KSU_TAG"
+          else
+            KSU_URL="https://github.com/backslashxx/KernelSU/releases"
+          fi
+          echo "KSU_LINK=$KSU_URL" >> $GITHUB_ENV
+          echo "✅ KernelSU Link: $KSU_URL"
+      - name: 🧰 Restore ZyC Clang Cache
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CLANG_DIR }}
+          key: clang-zyc-v2-${{ hashFiles('.github/workflows/*.yml') }}
 
-    - name: Clone AnyKernel3
-      run: |
-        cd $KERNEL_DIR
-        git clone --depth=1 -b "${{ matrix.codename }}" "$ANYKERNEL_URL" AnyKernel3
-        echo "ANYKERNEL_DIR=$KERNEL_DIR/AnyKernel3" >> $GITHUB_ENV
-
-    - name: Clone clang
-      run: |
-        cd $KERNEL_DIR
-        git clone --depth=1 "$CLANG_URL" clang
-        echo "CLANG_DIR=$KERNEL_DIR/clang" >> $GITHUB_ENV
-
-    - name: Set up KSU
-      run: |
-        cd $KERNEL_DIR
-        curl -LSs "$KSU_URL" | bash -s $KSU_BRANCH 
-        #sed -i 's/-DKSU_VERSION=[0-9]\+/-DKSU_VERSION=32502/g' KernelSU/kernel/Makefile
-
-    - name: Generate defconfig
-      run: |
-        cd $KERNEL_DIR
-        CONFIG_NAME="tama_${{ matrix.codename }}_defconfig"
-        DEFCONFIG_PATH="arch/arm64/configs/$CONFIG_NAME"
-        echo "CONFIG_KSU=y" >> "${DEFCONFIG_PATH}"
-        echo "CONFIG_KSU_EXTRAS=y" >> "${DEFCONFIG_PATH}"
-        echo "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y" >> "${DEFCONFIG_PATH}"
-        sed -i "s/CONFIG_LOCALVERSION=\"-Stardust\"/CONFIG_LOCALVERSION=\"-$KERNEL_VER\"/" "$DEFCONFIG_PATH"
-        make O=out ARCH=arm64 "$CONFIG_NAME"
-        mv out/.config "$DEFCONFIG_PATH"
-
-    - name: Build kernel
-      run: |
-        escape_markdown_v2() { 
-            echo "$1" | sed -e 's/\\/\\\\/g' -e 's/_/\\_/g' -e 's/\*/\\*/g' -e 's/\[/\\[/g' -e 's/\]/\\]/g' -e 's/(/\\(/g' -e 's/)/\\)/g' -e 's/~/\\~/g' -e 's/`/\\`/g' -e 's/>/\\>/g' -e 's/#/\\#/g' -e 's/+/\\+/g' -e 's/-/\\-/g' -e 's/=/\\=/g' -e 's/|/\\|/g' -e 's/{/\\{/g' -e 's/}/\\}/g';
-        }
-
-        send_telegram_message() {
-            local MESSAGE="$1"
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-                -d "chat_id=$CHAT_ID" \
-                -d "text=$MESSAGE"
-        }
-
-        send_telegram_file() {
-            local FILE_PATH="$1"
-            local FILE_NAME=$(basename "$FILE_PATH")
-            local ESCAPED_NAME=$(escape_markdown_v2 "$FILE_NAME")
-            local CAPTION="\`$ESCAPED_NAME\`"
-
-            local MAX_RETRY=5
-            local RETRY_DELAY=10
-            local COUNT=1
-
-            while [ $COUNT -le $MAX_RETRY ]; do
-                RESPONSE=$(curl --connect-timeout 30 --max-time 600 -s -w "%{http_code}" -o response.json -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
-                    -F "chat_id=$CHAT_ID" \
-                    -F "document=@$FILE_PATH" \
-                    -F "caption=$CAPTION" \
-                    -F "parse_mode=MarkdownV2")
-
-                HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-
-                if [ "$HTTP_CODE" -eq 200 ]; then
-                    return 0
-                fi
-
-                COUNT=$((COUNT+1))
-                sleep $RETRY_DELAY
-            done
-
-            send_telegram_message "❌ Upload failed after $MAX_RETRY attempts."
+      - name: ⬇️ Download ZyC Clang 15.0.7
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$CLANG_DIR"
+          echo "Fetching the latest ZyC Clang 15.0.7 release URL..."
+          CLANG_URL=$(curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases | grep -o "https://github.com/ZyCromerZ/Clang/releases/download/.*/Clang-15.0.7-.*\.tar\.gz" | head -n 1)
+          if [ -z "$CLANG_URL" ]; then
+            echo "Error: Failed to get Clang download URL!"
             exit 1
-        }
-
-        stop_handler() {
-          send_telegram_message "⚠️ Compilation was unexpectedly stopped!"
-          [ -f "$LOG_FILE" ] && send_telegram_file "$LOG_FILE"
-          exit 1
-        }
-
-        trap stop_handler ERR INT
-
-        cd $KERNEL_DIR
-        LOG_FILE=$KERNEL_DIR/build.log
-        OUT_DIR=$KERNEL_DIR/out
-        KERNEL_IMAGE_DIR=$OUT_DIR/arch/arm64/boot
-        KERNEL_IMAGE=$KERNEL_IMAGE_DIR/Image.gz-dtb
-        CONFIG_NAME="tama_${{ matrix.codename }}_defconfig"
-        KERNEL_COMMIT_ID=$(git rev-parse --short=7 HEAD)
-        ZIP_NAME="${KERNEL_VER}_${{ matrix.codename }}-KSU-${KERNEL_COMMIT_ID}-$(date +%Y%m%d).zip"
-        echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-        echo "LOG_FILE=$LOG_FILE" >> $GITHUB_ENV
-
-        send_telegram_message "🔨 Starting kernel compilation for ${{ matrix.codename }} on branch $KERNEL_BRANCH"
-
-        export KBUILD_BUILD_USER=ivy
-        export KBUILD_BUILD_HOST="$KERNEL_COMMIT_ID"
-        export PATH="$CLANG_DIR/bin:$PATH"
-
-        mkdir -p "$OUT_DIR"
-
-        make O="$OUT_DIR" ARCH=arm64 "$CONFIG_NAME"
-        make -j$(nproc) O="$OUT_DIR" ARCH=arm64 \
-          CC=clang LD=ld.lld AR=llvm-ar AS=llvm-as NM=llvm-nm \
-          OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-          CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          2>&1 | tee -a "$LOG_FILE"
-
-        BUILD_RESULT=${PIPESTATUS[0]}
-
-        if [ "$BUILD_RESULT" -ne 0 ]; then
-          send_telegram_message "❌ Compilation failed for ${{ matrix.codename }}!"
-          send_telegram_file "$LOG_FILE"
-          exit 1
-        fi
-
-        cp "$KERNEL_IMAGE" "$ANYKERNEL_DIR/Image.gz-dtb"
-        cd "$ANYKERNEL_DIR"
-        zip -r9 "../$ZIP_NAME" ./* > /dev/null
-        cd "$KERNEL_DIR"
-
-        send_telegram_file "$ZIP_NAME"
-        send_telegram_file "$LOG_FILE"
-        send_telegram_message "✅ Compilation completed for ${{ matrix.codename }} Flashable zip is ready."
-
-    - name: Upload kernel zip artifact
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.codename }}-${{ env.ZIP_NAME }}
-        path: ${{ env.KERNEL_DIR }}/${{ env.ZIP_NAME }}
-
-    - name: Upload build log artifact
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log-${{ matrix.codename }}
-        path: ${{ env.LOG_FILE }}
-        
+          fi
+          echo "Downloading from: $CLANG_URL"
+          curl -LSs "$CLANG_URL" -o zyc_clang.tar.gz
+          echo "Extracting Clang..."
+          tar -zxf zyc_clang.tar.gz -C "$CLANG_DIR"
+          rm -f zyc_clang.tar.gz
+          if [ ! -d "$CLANG_DIR/bin" ]; then
+            CLANG_SUBDIR=$(find "$CLANG_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            if [ -n "$CLANG_SUBDIR" ]; then
+              mv "$CLANG_SUBDIR"/* "$CLANG_DIR/"
+            fi
+          fi
+          echo "CLANG_VERSION=ZyC Clang 15.0.7" >> $GITHUB_ENV
+      - name: 🛠️ Fix Resource Errors
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          [ -f kernel/sched/sched.h ] && sed -i 's/cpu_rq(cpu)->cfs->cumulative_runnable_avg/cpu_rq(cpu)->cfs.cumulative_runnable_avg/g' kernel/sched/sched.h
+      - name: 📢 Telegram Notification - Build Started
+        run: |
+          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
+            CAM_TYPE="newcam"
+          else
+            CAM_TYPE="oldcam"
+          fi
+          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendMessage" --data-urlencode chat_id="${{ secrets.CHAT_ID }}" --data-urlencode parse_mode="HTML" --data-urlencode text="$MESSAGE"
+      - name: ⚙️ Generate Defconfig
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          export PATH="$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
+          make O=$OUT_DIR ARCH=${{ env.ARCH }} \
+            CC="$GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- ${{ env.DEFCONFIG }}
+      - name: 📝 Configure Configs
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          export PATH="$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
+          enable_config() { ./scripts/config --file "$OUT_DIR/.config" --enable "$1"; }
+          disable_config() { ./scripts/config --file "$OUT_DIR/.config" --disable "$1"; }
+          set_config() { ./scripts/config --file "$OUT_DIR/.config" --set-val "$1" "$2"; }
+          set_str() { ./scripts/config --file "$OUT_DIR/.config" --set-str "$1" "$2"; }
+          set_str CONFIG_DEFAULT_HOSTNAME "${{ inputs.DEFAULT_HOSTNAME }}"
+          set_str CONFIG_LOCALVERSION "${{ env.KERNEL_NAME_STRING }}"
+          if [ "${{ inputs.LOCALVERSION_AUTO }}" == "true" ]; then
+            echo "🔧 Enabling CONFIG_LOCALVERSION_AUTO (clean mode)..."
+            enable_config CONFIG_LOCALVERSION_AUTO
+            if [ -d ".git" ]; then
+              git config --global --add safe.directory "$PWD"
+              git update-index --assume-unchanged $(git ls-files) || true
+            fi
+          else
+            disable_config CONFIG_LOCALVERSION_AUTO
+          fi
+          disable_config CONFIG_KERNEL_XZ
+          disable_config CONFIG_RD_XZ
+          enable_config CONFIG_KERNEL_GZIP
+          enable_config CONFIG_RD_GZIP
+          sed -i 's/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.xz-dtb"/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.gz-dtb"/g' "$OUT_DIR/.config"
+          if [ "${{ inputs.QTI_HAPTICS }}" == "true" ]; then
+            echo "📳 Enabling QTI Haptics support..."
+            enable_config CONFIG_INPUT_QTI_HAPTICS
+          fi
+          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
+            echo "📷 Enabling Newcam support..."
+            enable_config CONFIG_XIAOMI_NEW_CAMERA_BLOBS
+          fi
+          if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
+            echo "🦊 Applying KernelSU configuration..."
+            enable_config CONFIG_KSU
+            enable_config CONFIG_KSU_TAMPER_SYSCALL_TABLE
+          fi
+          make O=$OUT_DIR ARCH=${{ env.ARCH }} \
+            CC="$GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- olddefconfig
+      - name: 🏗️ Start Kernel Build
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          export PATH="/usr/lib/ccache:$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
+          export KBUILD_BUILD_USER="${{ inputs.BUILD_USER }}"
+          export KBUILD_BUILD_HOST="${{ inputs.BUILD_HOST }}"
+          make -j$(nproc --all) O=$OUT_DIR ARCH=${{ env.ARCH }} \
+            CC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
+            HOSTCC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
+            HOSTCXX="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang++" \
+            AR="$GITHUB_WORKSPACE/$CLANG_DIR/bin/llvm-ar" \
+            NM="$GITHUB_WORKSPACE/$CLANG_DIR/bin/llvm-nm" \
+            OBJCOPY="$GITHUB_WORKSPACE/$CLANG_DIR/bin/llvm-objcopy" \
+            OBJDUMP="$GITHUB_WORKSPACE/$CLANG_DIR/bin/llvm-objdump" \
+            STRIP="$GITHUB_WORKSPACE/$CLANG_DIR/bin/llvm-strip" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-Wno-address -Wno-implicit-function-declaration" 2>&1 | tee build.log
+          if [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+            echo "❌ Kernel file not found!"
+            exit 1
+          fi
+          echo "✅ Kernel file successfully created."
+      - name: 🔍 Create Kernel Zip (Gzip Format)
+        id: img
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image" \) | head -n1)
+          if [ -z "$IMAGE" ]; then
+            echo "❌ Kernel file not found!"
+            exit 1
+          fi
+          echo "📄 Found: $(basename "$IMAGE")"
+          if [[ "$IMAGE" == *"dtb"* ]]; then
+            OUTPUT_NAME="Image.gz-dtb"
+          else
+            OUTPUT_NAME="Image.gz"
+          fi
+          if [[ "$IMAGE" == *.gz ]]; then
+            cp "$IMAGE" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+            echo "✅ File format is already .gz"
+          else
+            echo "🗜️ Compressing kernel to .gz format..."
+            gzip -c "$IMAGE" > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+            echo "✅ Compression completed: $OUTPUT_NAME"
+          fi
+          cd "$GITHUB_WORKSPACE"
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          cp "$GITHUB_WORKSPACE/$OUTPUT_NAME" AnyKernel3/
+          cd AnyKernel3
+          echo "IyMjIEFueUtlcm5lbDMgUmFtZGlzayBNb2QgU2NyaXB0CiMjIG9zbTBzaXMgQCB4ZGEtZGV2ZWxvcGVycwoKIyMjIEFueUtlcm5lbCBzZXR1cAojIGdsb2JhbCBwcm9wZXJ0aWVzCnByb3BlcnRpZXMoKSB7ICcKa2VybmVsLnN0cmluZz1TdGFyZmllbGQtS2VybmVsCmRvLmRldmljZWNoZWNrPTEKZG8ubW9kdWxlcz0wCmRvLnN5c3RlbWxlc3M9MQpkby5jbGVhbnVwPTEKZG8uY2xlYW51cG9uYWJvcnQ9MApkZXZpY2UubmFtZTE9YXBvbGxvCmRldmljZS5uYW1lMj1hcG9sbG9fa2RkaQpkZXZpY2UubmFtZTM9eHoyYwpkZXZpY2UubmFtZTQ9eHoyY19rZGRpCmRldmljZS5uYW1lNT14ejJjX2RjbQpzdXBwb3J0ZWQudmVyc2lvbnM9CnN1cHBvcnRlZC5wYXRjaGxldmVscz0Kc3VwcG9ydGVkLnZlbmRvcnBhdGNobGV2ZWxzPQonOyB9ICMgZW5kIHByb3BlcnRpZXMKCgojIyMgQW55S2VybmVsIGluc3RhbGwKIyMgYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCmJvb3RfYXR0cmlidXRlcygpIHsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CnNldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwp9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgYm9vdCBzaGVsbCB2YXJpYWJsZXMKQkxPQ0s9Ym9vdDsKSVNfU0xPVF9ERVZJQ0U9MTsKUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwpQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyBpbXBvcnQgZnVuY3Rpb25zL3ZhcmlhYmxlcyBhbmQgc2V0dXAgcGF0Y2hpbmcgLSBzZWUgZm9yIHJlZmVyZW5jZSAoRE8gTk9UIFJFTU9WRSkKLiB0b29scy9hazMtY29yZS5zaDsKCiMgYm9vdCBpbnN0YWxsCmR1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2skCndyaXRlX2Jvb3Q7ICMgdXNlIGZsYXNoX2Jvb3QgdG8gc2tpcCByYW1kaXNrIHJlcGFjaywgZS5nLiBmb3IgZGV2aWNlcyB3aXRoIGluaXRfYm9vdCByYW1kaXNrCiMjIGVuZCBib290IGluc3RhbGwKCgojIyBpbml0X2Jvb3QgZmlsZXMgYXR0cmlidXRlcwojaW5pdF9ib290X2F0dHJpYnV0ZXMoKSB7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJFJBTURJU0svKjsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwojfSAjIGVuZCBhdHRyaWJ1dGVzCgojIGluaXRfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPWluaXRfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgaW5pdF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgaW5pdF9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1bnBhY2sgcmFtZGlzayBzaW5jZSBpdCBpcyB0aGUgbmV3IGZpcnN0IHN0YWdlIGluaXQgcmFtZGlzayB3aGVyZSBvdmVybGF5LmQgbXVzdCBnbwoKI3dyaXRlX2Jvb3Q7CiMjIGVuZCBpbml0X2Jvb3QgaW5zdGFsbAoKCiMjIHZlbmRvcl9rZXJuZWxfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9rZXJuZWxfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgdmVuZG9yX2tlcm5lbF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKI3NwbGl0X2Jvb3Q7ICMgc2tpcCB1bnBhY2svcmVwYWNrIHJhbWRpc2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGFuZCB2ZW5kb3Jfa2VybmVsX2Jvb3QKCiNmbGFzaF9ib290OwojIyBlbmQgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKCgojIyB2ZW5kb3JfYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCiN2ZW5kb3JfYm9vdF9hdHRyaWJ1dGVzKCkgewojc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1MCA3NTAgJFJBTURJU0svaW5pdCogJFJBTURJU0svc2JpbjsKI30gIyBlbmQgYXR0cmlidXRlcwoKIyB2ZW5kb3JfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciB2ZW5kb3JfYm9vdCBwYXRjaGluZwojcmVzZXRfYWs7CgojIHZlbmRvcl9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290Cgojd3JpdGVfYm9vdDsgIyB1c2UgZmxhc2hfYm9vdCB0byBza2lwIHJhbWRpc2sgcmVwYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290CiMjIGVuZCB2ZW5kb3JfYm9vdCBpbnN0YWxsCg==" | base64 -d > anykernel.sh
+          sed -i 's/^supported\.versions=.*/supported.versions=16/' anykernel.sh
+          FINAL_LOCALVER="${{ env.KERNEL_NAME_STRING }}"
+          FINAL_LOCALVER=$(echo "$FINAL_LOCALVER" | sed 's/^-//')
+          sed -i -E "s/^(kernel\.string=).*/\1Starfield-Kernel ${FINAL_LOCALVER}/" anykernel.sh
+          TIMESTAMP=$(date +'%Y%m%d')
+          ZIP_NAME="tama_apollo-${{ env.KERNEL_VERSION }}${{ env.KERNEL_NAME_STRING }}-${TIMESTAMP}.zip"
+          zip -r9 "$ZIP_NAME" * -x ".git/*"
+          echo "zip_path=$GITHUB_WORKSPACE/AnyKernel3/$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+      - name: ✅ Telegram Notification - Build Success
+        if: success()
+        run: |
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - ${{ env.BUILD_START_TIME }}))
+          DURATION_STR="$((DURATION / 60))m $((DURATION % 60))s"
+          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
+            CAM_TYPE="newcam"
+          else
+            CAM_TYPE="oldcam"
+          fi
+          if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
+            KSU_TEXT="true (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
+          else
+            KSU_TEXT="false"
+          fi
+          MESSAGE=$(printf '✅ <b>BUILD SUCCESS</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> %s\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "$KSU_TEXT" "$DURATION_STR")
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
+            -F chat_id="${{ secrets.CHAT_ID }}" \
+            -F document="@${{ steps.img.outputs.zip_path }}" \
+            -F parse_mode="HTML" \
+            -F caption="$MESSAGE"
+      - name: ❌ Telegram Notification - Build Failed
+        if: failure()
+        run: |
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - ${{ env.BUILD_START_TIME }}))
+          DURATION_STR="$((DURATION / 60))m $((DURATION % 60))s"
+          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
+            CAM_TYPE="newcam"
+          else
+            CAM_TYPE="oldcam"
+          fi
+          MESSAGE=$(printf '❌ <b>BUILD FAILED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>\n\n💥 <i>Check the build.log file above for error details.</i>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}" "$DURATION_STR")
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
+            -F chat_id="${{ secrets.CHAT_ID }}" \
+            -F document="@${{ env.KERNEL_DIR }}/build.log" \
+            -F parse_mode="HTML" \
+            -F caption="$MESSAGE"
