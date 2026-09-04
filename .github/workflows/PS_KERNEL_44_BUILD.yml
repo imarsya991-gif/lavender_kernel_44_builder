@@ -259,10 +259,11 @@ jobs:
             disable_config CONFIG_LOCALVERSION_AUTO
           fi
 
-          disable_config CONFIG_KERNEL_GZIP
-          enable_config CONFIG_KERNEL_XZ
-          enable_config CONFIG_RD_XZ
-          sed -i 's/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.gz-dtb"/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.xz-dtb"/g' "$OUT_DIR/.config"
+          disable_config CONFIG_KERNEL_XZ
+          disable_config CONFIG_RD_XZ
+          enable_config CONFIG_KERNEL_GZIP
+          enable_config CONFIG_RD_GZIP
+          sed -i 's/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.xz-dtb"/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.gz-dtb"/g' "$OUT_DIR/.config"
 
           if [ "${{ inputs.QTI_HAPTICS }}" == "true" ]; then
             echo "📳 Enabling QTI Haptics support..."
@@ -307,17 +308,17 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             KCFLAGS="-Wno-address -Wno-implicit-function-declaration" 2>&1 | tee build.log
 
-          if [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
+          if [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
             echo "❌ Kernel file not found!"
             exit 1
           fi
           echo "✅ Kernel file successfully created."
 
-      - name: 🔍 Create Kernel Zip (XZ Format)
+      - name: 🔍 Create Kernel Zip (Gzip Format)
         id: img
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n1)
+          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image" \) | head -n1)
 
           if [ -z "$IMAGE" ]; then
             echo "❌ Kernel file not found!"
@@ -327,17 +328,17 @@ jobs:
           echo "📄 Found: $(basename "$IMAGE")"
 
           if [[ "$IMAGE" == *"dtb"* ]]; then
-            OUTPUT_NAME="Image.xz-dtb"
+            OUTPUT_NAME="Image.gz-dtb"
           else
-            OUTPUT_NAME="Image.xz"
+            OUTPUT_NAME="Image.gz"
           fi
 
-          if [[ "$IMAGE" == *.xz ]]; then
+          if [[ "$IMAGE" == *.gz ]]; then
             cp "$IMAGE" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
-            echo "✅ File format is already .xz"
+            echo "✅ File format is already .gz"
           else
-            echo "🗜️ Compressing kernel to .xz format..."
-            xz -f -k "$IMAGE" -c > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+            echo "🗜️ Compressing kernel to .gz format..."
+            gzip -c "$IMAGE" > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
             echo "✅ Compression completed: $OUTPUT_NAME"
           fi
 
@@ -347,7 +348,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/$OUTPUT_NAME" AnyKernel3/
 
           cd AnyKernel3
-          echo "IyMjIEFueUtlcm5lbDMgUmFtZGlzayBNb2QgU2NyaXB0CiMjIG9zbTBzaXMgQCB4ZGEtZGV2ZWxvcGVycwoKIyMjIEFueUtlcm5lbCBzZXR1cAojIGdsb2JhbCBwcm9wZXJ0aWVzCnByb3BlcnRpZXMoKSB7ICcKa2VybmVsLnN0cmluZz1TdGFyZmllbGQtS2VybmVsCmRvLmRldmljZWNoZWNrPTEKZG8ubW9kdWxlcz0wCmRvLnN5c3RlbWxlc3M9MQpkby5jbGVhbnVwPTEKZG8uY2xlYW51cG9uYWJvcnQ9MApkZXZpY2UubmFtZTE9YXBvbGxvCmRldmljZS5uYW1lMj1hcG9sbG9fa2RkaQpkZXZpY2UubmFtZTM9eHoyYwpkZXZpY2UubmFtZTQ9eHoyY19rZGRpCmRldmljZS5uYW1lNT14ejJjX2RjbQpzdXBwb3J0ZWQudmVyc2lvbnM9CnN1cHBvcnRlZC5wYXRjaGxldmVscz0Kc3VwcG9ydGVkLnZlbmRvcnBhdGNobGV2ZWxzPQonOyB9ICMgZW5kIHByb3BlcnRpZXMKCgojIyMgQW55S2VybmVsIGluc3RhbGwKIyMgYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCmJvb3RfYXR0cmlidXRlcygpIHsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CnNldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwp9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgYm9vdCBzaGVsbCB2YXJpYWJsZXMKQkxPQ0s9Ym9vdDsKSVNfU0xPVF9ERVZJQ0U9MTsKUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwpQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyBpbXBvcnQgZnVuY3Rpb25zL3ZhcmlhYmxlcyBhbmQgc2V0dXAgcGF0Y2hpbmcgLSBzZWUgZm9yIHJlZmVyZW5jZSAoRE8gTk9UIFJFTU9WRSkKLiB0b29scy9hazMtY29yZS5zaDsKCiMgYm9vdCBpbnN0YWxsCmR1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2sKd3JpdGVfYm9vdDsgIyB1c2UgZmxhc2hfYm9vdCB0byBza2lwIHJhbWRpc2sgcmVwYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2sKIyMgZW5kIGJvb3QgaW5zdGFsbAoKCiMjIGluaXRfYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCiNpbml0X2Jvb3RfYXR0cmlidXRlcygpIHsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzU1IDY0NCAkUkFNRElTSy8qOwojc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTAgNzUwICRSQU1ESVNLL2luaXQqICRSQU1ESVNLL3NiaW47CiN9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgaW5pdF9ib290IHNoZWxsIHZhcmlhYmxlcwojQkxPQ0s9aW5pdF9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciBpbml0X2Jvb3QgcGF0Y2hpbmcKI3Jlc2V0X2FrOwoKIyBpbml0X2Jvb3QgaW5zdGFsbAojZHVtcF9ib290OyAjIHVucGFjayByYW1kaXNrIHNpbmNlIGl0IGlzIHRoZSBuZXcgZmlyc3Qgc3RhZ2UgaW5pdCByYW1kaXNrIHdoZXJlIG92ZXJsYXkuZCBtdXN0IGdvCgojd3JpdGVfYm9vdDsKIyMgZW5kIGluaXRfYm9vdCBpbnN0YWxsCgoKIyMgdmVuZG9yX2tlcm5lbF9ib290IHNoZWxsIHZhcmlhYmxlcwojQkxPQ0s9dmVuZG9yX2tlcm5lbF9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciB2ZW5kb3Jfa2VybmVsX2Jvb3QgcGF0Y2hpbmcKI3Jlc2V0X2FrOwoKIyB2ZW5kb3Jfa2VybmVsX2Jvb3QgaW5zdGFsbAojc3BsaXRfYm9vdDsgIyBza2lwIHVucGFjay9yZXBhY2sgcmFtZGlzaywgZS5nLiBmb3IgZHRiIG9uIGRldmljZXMgd2l0aCBoZHIgdjQgYW5kIHZlbmRvcl9rZXJuZWxfYm9vdAoKI2ZsYXNoX2Jvb3Q7CiMjIGVuZCB2ZW5kb3Jfa2VybmVsX2Jvb3QgaW5zdGFsbAoKCiMjIHZlbmRvcl9ib290IGZpbGVzIGF0dHJpYnV0ZXMKI3ZlbmRvcl9ib290X2F0dHJpYnV0ZXMoKSB7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJFJBTURJU0svKjsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwojfSAjIGVuZCBhdHRyaWJ1dGVzCgojIHZlbmRvcl9ib290IHNoZWxsIHZhcmlhYmxlcwojQkxPQ0s9dmVuZG9yX2Jvb3Q7CiNJU19TTE9UX0RFVklDRT0xOwojUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwojUEFUQ0hfVkJNRVRBX0ZMQUc9YXV0bzsKCiMgcmVzZXQgZm9yIHZlbmRvcl9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgdmVuZG9yX2Jvb3QgaW5zdGFsbAojZHVtcF9ib290OyAjIHVzZSBzcGxpdF9ib290IHRvIHNraXAgcmFtZGlzayB1bnBhY2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGJ1dCBubyB2ZW5kb3Jfa2VybmVsX2Jvb3QKCiN3cml0ZV9ib290OyAjIHVzZSBmbGFzaF9ib290IHRvIHNraXAgcmFtZGlzayByZXBhY2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGJ1dCBubyB2ZW5kb3Jfa2VybmVsX2Jvb3QKIyMgZW5kIHZlbmRvcl9ib290IGluc3RhbGwK" | base64 -d > anykernel.sh
+          echo "IyMjIEFueUtlcm5lbDMgUmFtZGlzayBNb2QgU2NyaXB0CiMjIG9zbTBzaXMgQCB4ZGEtZGV2ZWxvcGVycwoKIyMjIEFueUtlcm5lbCBzZXR1cAojIGdsb2JhbCBwcm9wZXJ0aWVzCnByb3BlcnRpZXMoKSB7ICcKa2VybmVsLnN0cmluZz1TdGFyZmllbGQtS2VybmVsCmRvLmRldmljZWNoZWNrPTEKZG8ubW9kdWxlcz0wCmRvLnN5c3RlbWxlc3M9MQpkby5jbGVhbnVwPTEKZG8uY2xlYW51cG9uYWJvcnQ9MApkZXZpY2UubmFtZTE9YXBvbGxvCmRldmljZS5uYW1lMj1hcG9sbG9fa2RkaQpkZXZpY2UubmFtZTM9eHoyYwpkZXZpY2UubmFtZTQ9eHoyY19rZGRpCmRldmljZS5uYW1lNT14ejJjX2RjbQpzdXBwb3J0ZWQudmVyc2lvbnM9CnN1cHBvcnRlZC5wYXRjaGxldmVscz0Kc3VwcG9ydGVkLnZlbmRvcnBhdGNobGV2ZWxzPQonOyB9ICMgZW5kIHByb3BlcnRpZXMKCgojIyMgQW55S2VybmVsIGluc3RhbGwKIyMgYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCmJvb3RfYXR0cmlidXRlcygpIHsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CnNldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwp9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgYm9vdCBzaGVsbCB2YXJpYWJsZXMKQkxPQ0s9Ym9vdDsKSVNfU0xPVF9ERVZJQ0U9MTsKUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwpQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyBpbXBvcnQgZnVuY3Rpb25zL3ZhcmlhYmxlcyBhbmQgc2V0dXAgcGF0Y2hpbmcgLSBzZWUgZm9yIHJlZmVyZW5jZSAoRE8gTk9UIFJFTU9WRSkKLiB0b29scy9hazMtY29yZS5zaDsKCiMgYm9vdCBpbnN0YWxsCmR1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2skCndyaXRlX2Jvb3Q7ICMgdXNlIGZsYXNoX2Jvb3QgdG8gc2tpcCByYW1kaXNrIHJlcGFjaywgZS5nLiBmb3IgZGV2aWNlcyB3aXRoIGluaXRfYm9vdCByYW1kaXNrCiMjIGVuZCBib290IGluc3RhbGwKCgojIyBpbml0X2Jvb3QgZmlsZXMgYXR0cmlidXRlcwojaW5pdF9ib290X2F0dHJpYnV0ZXMoKSB7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJFJBTURJU0svKjsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwojfSAjIGVuZCBhdHRyaWJ1dGVzCgojIGluaXRfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPWluaXRfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgaW5pdF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgaW5pdF9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1bnBhY2sgcmFtZGlzayBzaW5jZSBpdCBpcyB0aGUgbmV3IGZpcnN0IHN0YWdlIGluaXQgcmFtZGlzayB3aGVyZSBvdmVybGF5LmQgbXVzdCBnbwoKI3dyaXRlX2Jvb3Q7CiMjIGVuZCBpbml0X2Jvb3QgaW5zdGFsbAoKCiMjIHZlbmRvcl9rZXJuZWxfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9rZXJuZWxfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgdmVuZG9yX2tlcm5lbF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKI3NwbGl0X2Jvb3Q7ICMgc2tpcCB1bnBhY2svcmVwYWNrIHJhbWRpc2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGFuZCB2ZW5kb3Jfa2VybmVsX2Jvb3QKCiNmbGFzaF9ib290OwojIyBlbmQgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKCgojIyB2ZW5kb3JfYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCiN2ZW5kb3JfYm9vdF9hdHRyaWJ1dGVzKCkgewojc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1MCA3NTAgJFJBTURJU0svaW5pdCogJFJBTURJU0svc2JpbjsKI30gIyBlbmQgYXR0cmlidXRlcwoKIyB2ZW5kb3JfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciB2ZW5kb3JfYm9vdCBwYXRjaGluZwojcmVzZXRfYWs7CgojIHZlbmRvcl9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290Cgojd3JpdGVfYm9vdDsgIyB1c2UgZmxhc2hfYm9vdCB0byBza2lwIHJhbWRpc2sgcmVwYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290CiMjIGVuZCB2ZW5kb3JfYm9vdCBpbnN0YWxsCg==" | base64 -d > anykernel.sh
 
           sed -i 's/^supported\.versions=.*/supported.versions=16/' anykernel.sh
 
