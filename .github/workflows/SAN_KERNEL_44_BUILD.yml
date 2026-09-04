@@ -69,6 +69,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      KSU_EXPECTED_SIZE: "0x375"
+      KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
+      KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
     permissions:
       contents: write
 
@@ -158,6 +162,10 @@ jobs:
       - name: 🦊 Setup KernelSU
         if: ${{ inputs.INJECT_KSU == true }}
         working-directory: ${{ env.KERNEL_DIR }}
+        env:
+          KSU_EXPECTED_SIZE: "0x375"
+          KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
+          KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
         run: |
           curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
           
