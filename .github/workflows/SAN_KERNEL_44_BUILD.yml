@@ -51,7 +51,7 @@ on:
         default: false
         type: boolean
       INJECT_KSU:
-        description: '🦊 Inject KernelSU'
+        description: '🦊 Inject KernelSU (MamboSU, manual hook)'
         required: true
         default: false
         type: boolean
@@ -69,10 +69,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      KSU_EXPECTED_SIZE: "0x375"
-      KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
-      KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
     permissions:
       contents: write
 
@@ -92,13 +88,13 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           CLEAN_INPUT=$(echo "${{ inputs.LOCALVERSION }}" | sed 's/^-//')
-          
+
           if [ -n "$CLEAN_INPUT" ]; then
             BASE_NAME="$CLEAN_INPUT"
           else
             BASE_NAME=""
           fi
-          
+
           if [ "${{ inputs.DISPLAY_BRANCH_NAME }}" == "true" ]; then
             if [ -n "$BASE_NAME" ]; then
               FINAL_LOCAL="-${{ inputs.KERNEL_BRANCH }}-${BASE_NAME}"
@@ -112,7 +108,7 @@ jobs:
               FINAL_LOCAL=""
             fi
           fi
-          
+
           echo "✅ Kernel string set to: $FINAL_LOCAL"
           echo "KERNEL_NAME_STRING=$FINAL_LOCAL" >> $GITHUB_ENV
 
@@ -144,7 +140,7 @@ jobs:
 
           sudo apt-get install -yq --no-install-recommends \
             -o Acquire::Retries=3 \
-            bc bison libssl-dev libelf-dev build-essential python3 python3-pip curl git zip unzip wget ccache libncurses-dev rsync gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi xz-utils
+            bc bison libssl-dev libelf-dev build-essential python3 python3-pip curl git zip unzip wget ccache libncurses-dev rsync gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi xz-utils patch
 
       - name: ⚡ Setup Compiler Cache
         run: |
@@ -158,26 +154,53 @@ jobs:
           key: ccache-eas-${{ env.DEFCONFIG }}-${{ github.run_id }}
           restore-keys: |
             ccache-eas-${{ env.DEFCONFIG }}-
-            
-      - name: 🦊 Setup KernelSU
+
+      - name: 🦊 Setup MamboSU (manual hook)
         if: ${{ inputs.INJECT_KSU == true }}
         working-directory: ${{ env.KERNEL_DIR }}
-        env:
-          KSU_EXPECTED_SIZE: "0x375"
-          KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
-          KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
         run: |
-          curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
-          
-          KSU_RELEASE_JSON=$(curl -s https://api.github.com/repos/backslashxx/KernelSU/releases/latest)
+          curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
+
+          KSU_RELEASE_JSON=$(curl -s https://api.github.com/repos/hzzmonetvn/MamboSU/releases/latest)
           KSU_TAG=$(echo "$KSU_RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | cut -d'"' -f4)
           if [ -n "$KSU_TAG" ]; then
-            KSU_URL="https://github.com/backslashxx/KernelSU/releases/tag/$KSU_TAG"
+            KSU_URL="https://github.com/hzzmonetvn/MamboSU/releases/tag/$KSU_TAG"
           else
-            KSU_URL="https://github.com/backslashxx/KernelSU/releases"
+            KSU_URL="https://github.com/hzzmonetvn/MamboSU/releases"
           fi
           echo "KSU_LINK=$KSU_URL" >> $GITHUB_ENV
           echo "✅ KernelSU Link: $KSU_URL"
+
+      - name: 🩹 Apply Manual Hook Patches (Non-GKI)
+        if: ${{ inputs.INJECT_KSU == true }}
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          git clone --depth=1 https://github.com/rksuorg/kernel_patches.git "$GITHUB_WORKSPACE/kernel_patches"
+
+          echo "📂 Isi folder manual_hook:"
+          find "$GITHUB_WORKSPACE/kernel_patches/manual_hook" -type f | tee /tmp/patch_list.txt
+
+          FAILED=0
+          while read -r p; do
+            case "$p" in
+              *.patch)
+                echo "➡️ Applying: $p"
+                if ! patch -p1 --forward < "$p"; then
+                  echo "⚠️ GAGAL apply: $p — cek manual, kemungkinan konflik/sudah ada"
+                  FAILED=1
+                fi
+                ;;
+            esac
+          done < /tmp/patch_list.txt
+
+          if [ "$FAILED" == "1" ]; then
+            echo "⚠️ Ada patch yang gagal apply otomatis. Build tetap lanjut, tapi cek reject file (.rej) kalau ada masalah saat boot."
+          fi
+
+      - name: 🛠️ Fix Resource Errors
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          [ -f kernel/sched/sched.h ] && sed -i 's/cpu_rq(cpu)->cfs->cumulative_runnable_avg/cpu_rq(cpu)->cfs.cumulative_runnable_avg/g' kernel/sched/sched.h
 
       - name: 🧰 Restore ZyC Clang Cache
         id: clang-cache
@@ -193,32 +216,27 @@ jobs:
           echo "Fetching the latest ZyC Clang 15.0.7 release URL..."
 
           CLANG_URL=$(curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases | grep -o "https://github.com/ZyCromerZ/Clang/releases/download/.*/Clang-15.0.7-.*\.tar\.gz" | head -n 1)
-          
+
           if [ -z "$CLANG_URL" ]; then
             echo "Error: Failed to get Clang download URL!"
             exit 1
           fi
-          
+
           echo "Downloading from: $CLANG_URL"
           curl -LSs "$CLANG_URL" -o zyc_clang.tar.gz
-          
+
           echo "Extracting Clang..."
           tar -zxf zyc_clang.tar.gz -C "$CLANG_DIR"
           rm -f zyc_clang.tar.gz
-          
+
           if [ ! -d "$CLANG_DIR/bin" ]; then
             CLANG_SUBDIR=$(find "$CLANG_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
             if [ -n "$CLANG_SUBDIR" ]; then
               mv "$CLANG_SUBDIR"/* "$CLANG_DIR/"
             fi
           fi
-          
-          echo "CLANG_VERSION=ZyC Clang 15.0.7" >> $GITHUB_ENV
 
-      - name: 🛠️ Fix Resource Errors
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          [ -f kernel/sched/sched.h ] && sed -i 's/cpu_rq(cpu)->cfs->cumulative_runnable_avg/cpu_rq(cpu)->cfs.cumulative_runnable_avg/g' kernel/sched/sched.h
+          echo "CLANG_VERSION=ZyC Clang 15.0.7" >> $GITHUB_ENV
 
       - name: 📢 Telegram Notification - Build Started
         run: |
@@ -227,15 +245,15 @@ jobs:
           else
             CAM_TYPE="oldcam"
           fi
-          
-          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
+
+          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s (manual hook)</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendMessage" --data-urlencode chat_id="${{ secrets.CHAT_ID }}" --data-urlencode parse_mode="HTML" --data-urlencode text="$MESSAGE"
 
       - name: ⚙️ Generate Defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           export PATH="$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
-          
+
           make O=$OUT_DIR ARCH=${{ env.ARCH }} \
             CC="$GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -246,19 +264,19 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           export PATH="$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
-          
+
           enable_config() { ./scripts/config --file "$OUT_DIR/.config" --enable "$1"; }
           disable_config() { ./scripts/config --file "$OUT_DIR/.config" --disable "$1"; }
           set_config() { ./scripts/config --file "$OUT_DIR/.config" --set-val "$1" "$2"; }
           set_str() { ./scripts/config --file "$OUT_DIR/.config" --set-str "$1" "$2"; }
-          
+
           set_str CONFIG_DEFAULT_HOSTNAME "${{ inputs.DEFAULT_HOSTNAME }}"
           set_str CONFIG_LOCALVERSION "${{ env.KERNEL_NAME_STRING }}"
-          
+
           if [ "${{ inputs.LOCALVERSION_AUTO }}" == "true" ]; then
             echo "🔧 Enabling CONFIG_LOCALVERSION_AUTO (clean mode)..."
             enable_config CONFIG_LOCALVERSION_AUTO
-            
+
             if [ -d ".git" ]; then
               git config --global --add safe.directory "$PWD"
               git update-index --assume-unchanged $(git ls-files) || true
@@ -276,16 +294,19 @@ jobs:
             echo "📳 Enabling QTI Haptics support..."
             enable_config CONFIG_INPUT_QTI_HAPTICS
           fi
-          
+
           if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
             echo "📷 Enabling Newcam support..."
             enable_config CONFIG_XIAOMI_NEW_CAMERA_BLOBS
           fi
 
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
-            echo "🦊 Applying KernelSU configuration..."
+            echo "🦊 Applying MamboSU manual hook configuration..."
             enable_config CONFIG_KSU
-            enable_config CONFIG_KSU_TAMPER_SYSCALL_TABLE
+            enable_config CONFIG_KSU_MANUAL_HOOK
+            disable_config CONFIG_KPROBES
+            disable_config CONFIG_HAVE_KPROBES
+            disable_config CONFIG_KPROBE_EVENTS
           fi
 
           make O=$OUT_DIR ARCH=${{ env.ARCH }} \
@@ -300,7 +321,7 @@ jobs:
           export PATH="/usr/lib/ccache:$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
           export KBUILD_BUILD_USER="${{ inputs.BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ inputs.BUILD_HOST }}"
-          
+
           make -j$(nproc --all) O=$OUT_DIR ARCH=${{ env.ARCH }} \
             CC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
             HOSTCC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
@@ -326,20 +347,20 @@ jobs:
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image" \) | head -n1)
-          
+
           if [ -z "$IMAGE" ]; then
             echo "❌ Kernel file not found!"
             exit 1
           fi
-          
+
           echo "📄 Found: $(basename "$IMAGE")"
-          
+
           if [[ "$IMAGE" == *"dtb"* ]]; then
             OUTPUT_NAME="Image.xz-dtb"
           else
             OUTPUT_NAME="Image.xz"
           fi
-          
+
           if [[ "$IMAGE" == *.xz ]]; then
             cp "$IMAGE" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
             echo "✅ File format is already .xz"
@@ -348,12 +369,12 @@ jobs:
             xz -f -k "$IMAGE" -c > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
             echo "✅ Compression completed: $OUTPUT_NAME"
           fi
-          
+
           cd "$GITHUB_WORKSPACE"
           git clone --depth=1 https://github.com/ExXyrou/san_kernel_flashable AnyKernel3
-          
+
           cp "$GITHUB_WORKSPACE/$OUTPUT_NAME" AnyKernel3/
-          
+
           cd AnyKernel3
           if [ -f anykernel.sh ]; then
             sed -i 's/Image\.gz-dtb/Image.xz-dtb/g; s/Image\.gz/Image.xz/g; s/Image$/Image.xz/g' anykernel.sh
@@ -361,15 +382,15 @@ jobs:
               sed -i "s/^kernel_name=.*/kernel_name=\"$OUTPUT_NAME\"/" anykernel.sh
             fi
           fi
-          
+
           FINAL_LOCALVER="${{ env.KERNEL_NAME_STRING }}"
           FINAL_LOCALVER=$(echo "$FINAL_LOCALVER" | sed 's/^-//')
           sed -i -E 's/^(kernel\.string=).*/\1'"$FINAL_LOCALVER"'/' anykernel.sh
-          
+
           TIMESTAMP=$(date +'%Y%m%d')
           ZIP_NAME="lavender-${{ env.KERNEL_VERSION }}${{ env.KERNEL_NAME_STRING }}-${TIMESTAMP}.zip"
           zip -r9 "$ZIP_NAME" * -x ".git/*"
-          
+
           echo "zip_path=$GITHUB_WORKSPACE/AnyKernel3/$ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
 
@@ -387,13 +408,13 @@ jobs:
           fi
 
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
-            KSU_TEXT="true (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
+            KSU_TEXT="true, manual hook (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
           else
             KSU_TEXT="false"
           fi
 
           MESSAGE=$(printf '✅ <b>BUILD SUCCESS</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> %s\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "$KSU_TEXT" "$DURATION_STR")
-          
+
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
             -F chat_id="${{ secrets.CHAT_ID }}" \
             -F document="@${{ steps.img.outputs.zip_path }}" \
@@ -414,7 +435,7 @@ jobs:
           fi
 
           MESSAGE=$(printf '❌ <b>BUILD FAILED</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>\n\n💥 <i>Check the build.log file above for error details.</i>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}" "$DURATION_STR")
-          
+
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
             -F chat_id="${{ secrets.CHAT_ID }}" \
             -F document="@${{ env.KERNEL_DIR }}/build.log" \
