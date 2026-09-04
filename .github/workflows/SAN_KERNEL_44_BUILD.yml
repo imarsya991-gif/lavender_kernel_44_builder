@@ -51,7 +51,7 @@ on:
         default: false
         type: boolean
       INJECT_KSU:
-        description: '🦊 Inject KernelSU (MamboSU, manual hook)'
+        description: '🦊 Inject KernelSU (MamboSU, Hookless)'
         required: true
         default: false
         type: boolean
@@ -155,7 +155,7 @@ jobs:
           restore-keys: |
             ccache-eas-${{ env.DEFCONFIG }}-
 
-      - name: 🦊 Setup MamboSU (manual hook)
+      - name: 🦊 Setup MamboSU (Hookless)
         if: ${{ inputs.INJECT_KSU == true }}
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -170,32 +170,6 @@ jobs:
           fi
           echo "KSU_LINK=$KSU_URL" >> $GITHUB_ENV
           echo "✅ KernelSU Link: $KSU_URL"
-
-      - name: 🩹 Apply Manual Hook Patches (Non-GKI)
-        if: ${{ inputs.INJECT_KSU == true }}
-        working-directory: ${{ env.KERNEL_DIR }}
-        run: |
-          git clone --depth=1 https://github.com/rksuorg/kernel_patches.git "$GITHUB_WORKSPACE/kernel_patches"
-
-          echo "📂 Isi folder manual_hook:"
-          find "$GITHUB_WORKSPACE/kernel_patches/manual_hook" -type f | tee /tmp/patch_list.txt
-
-          FAILED=0
-          while read -r p; do
-            case "$p" in
-              *.patch)
-                echo "➡️ Applying: $p"
-                if ! patch -p1 --forward < "$p"; then
-                  echo "⚠️ GAGAL apply: $p — cek manual, kemungkinan konflik/sudah ada"
-                  FAILED=1
-                fi
-                ;;
-            esac
-          done < /tmp/patch_list.txt
-
-          if [ "$FAILED" == "1" ]; then
-            echo "⚠️ Ada patch yang gagal apply otomatis. Build tetap lanjut, tapi cek reject file (.rej) kalau ada masalah saat boot."
-          fi
 
       - name: 🛠️ Fix Resource Errors
         working-directory: ${{ env.KERNEL_DIR }}
@@ -246,7 +220,7 @@ jobs:
             CAM_TYPE="oldcam"
           fi
 
-          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s (manual hook)</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
+          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Lavender</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s (hookless)</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendMessage" --data-urlencode chat_id="${{ secrets.CHAT_ID }}" --data-urlencode parse_mode="HTML" --data-urlencode text="$MESSAGE"
 
       - name: ⚙️ Generate Defconfig
@@ -301,9 +275,9 @@ jobs:
           fi
 
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
-            echo "🦊 Applying MamboSU manual hook configuration..."
+            echo "🦊 Applying MamboSU hookless configuration..."
             enable_config CONFIG_KSU
-            enable_config CONFIG_KSU_MANUAL_HOOK
+            disable_config CONFIG_KSU_MANUAL_HOOK
             disable_config CONFIG_KPROBES
             disable_config CONFIG_HAVE_KPROBES
             disable_config CONFIG_KPROBE_EVENTS
@@ -408,7 +382,7 @@ jobs:
           fi
 
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
-            KSU_TEXT="true, manual hook (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
+            KSU_TEXT="true, hookless (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
           else
             KSU_TEXT="false"
           fi
