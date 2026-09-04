@@ -1,4 +1,4 @@
-name: 🛠️ BTX KERNEL XZ2/XZ3 4.9
+name: 🛠️ SONY KERNEL XZ2/XZ3 4.9
 
 on:
   workflow_dispatch:
@@ -69,10 +69,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      KSU_EXPECTED_SIZE: "0x375"
-      KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
-      KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
     permissions:
       contents: write
 
@@ -162,10 +158,6 @@ jobs:
       - name: 🦊 Setup KernelSU
         if: ${{ inputs.INJECT_KSU == true }}
         working-directory: ${{ env.KERNEL_DIR }}
-        env:
-          KSU_EXPECTED_SIZE: "0x375"
-          KSU_EXPECTED_HASH: "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588"
-          KSU_MANAGER_PACKAGE: "com.kowx712.supermanager"
         run: |
           curl -LSs "https://raw.githubusercontent.com/backslashxx/KernelSU/refs/heads/master/kernel/setup.sh" | bash -s master
 
@@ -350,26 +342,122 @@ jobs:
           fi
 
           cd "$GITHUB_WORKSPACE"
-          # Menggunakan AnyKernel3 upstream resmi (osm0sis), device di-set ke apollo (Sony XZ2 Compact)
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
 
           cp "$GITHUB_WORKSPACE/$OUTPUT_NAME" AnyKernel3/
 
           cd AnyKernel3
-          if [ -f anykernel.sh ]; then
-            sed -i 's/Image\.gz-dtb/Image.xz-dtb/g; s/Image\.gz/Image.xz/g; s/Image$/Image.xz/g' anykernel.sh
-            if grep -q "kernel_name=" anykernel.sh; then
-              sed -i "s/^kernel_name=.*/kernel_name=\"$OUTPUT_NAME\"/" anykernel.sh
-            fi
-            sed -i 's/^device\.name1=.*/device.name1=apollo/' anykernel.sh
-            sed -i 's/^device\.name2=.*/device.name2=/' anykernel.sh
-            sed -i 's/^device\.name3=.*/device.name3=/' anykernel.sh
-            sed -i 's/^device\.name4=.*/device.name4=/' anykernel.sh
-          fi
+          cat > anykernel.sh << 'ANYKERNEL_EOF'
+### AnyKernel3 Ramdisk Mod Script
+## osm0sis @ xda-developers
+
+### AnyKernel setup
+# global properties
+properties() { '
+kernel.string=Starfield-Kernel
+do.devicecheck=1
+do.modules=0
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=apollo
+device.name2=apollo_kddi
+device.name3=xz2c
+device.name4=xz2c_kddi
+device.name5=xz2c_dcm
+supported.versions=
+supported.patchlevels=
+supported.vendorpatchlevels=
+'; } # end properties
+
+
+### AnyKernel install
+## boot files attributes
+boot_attributes() {
+set_perm_recursive 0 0 755 644 $RAMDISK/*;
+set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+} # end attributes
+
+# boot shell variables
+BLOCK=boot;
+IS_SLOT_DEVICE=1;
+RAMDISK_COMPRESSION=auto;
+PATCH_VBMETA_FLAG=auto;
+
+# import functions/variables and setup patching - see for reference (DO NOT REMOVE)
+. tools/ak3-core.sh;
+
+# boot install
+dump_boot; # use split_boot to skip ramdisk unpack, e.g. for devices with init_boot ramdisk
+write_boot; # use flash_boot to skip ramdisk repack, e.g. for devices with init_boot ramdisk
+## end boot install
+
+
+## init_boot files attributes
+#init_boot_attributes() {
+#set_perm_recursive 0 0 755 644 $RAMDISK/*;
+#set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+#} # end attributes
+
+# init_boot shell variables
+#BLOCK=init_boot;
+#IS_SLOT_DEVICE=1;
+#RAMDISK_COMPRESSION=auto;
+#PATCH_VBMETA_FLAG=auto;
+
+# reset for init_boot patching
+#reset_ak;
+
+# init_boot install
+#dump_boot; # unpack ramdisk since it is the new first stage init ramdisk where overlay.d must go
+
+#write_boot;
+## end init_boot install
+
+
+## vendor_kernel_boot shell variables
+#BLOCK=vendor_kernel_boot;
+#IS_SLOT_DEVICE=1;
+#RAMDISK_COMPRESSION=auto;
+#PATCH_VBMETA_FLAG=auto;
+
+# reset for vendor_kernel_boot patching
+#reset_ak;
+
+# vendor_kernel_boot install
+#split_boot; # skip unpack/repack ramdisk, e.g. for dtb on devices with hdr v4 and vendor_kernel_boot
+
+#flash_boot;
+## end vendor_kernel_boot install
+
+
+## vendor_boot files attributes
+#vendor_boot_attributes() {
+#set_perm_recursive 0 0 755 644 $RAMDISK/*;
+#set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+#} # end attributes
+
+# vendor_boot shell variables
+#BLOCK=vendor_boot;
+#IS_SLOT_DEVICE=1;
+#RAMDISK_COMPRESSION=auto;
+#PATCH_VBMETA_FLAG=auto;
+
+# reset for vendor_boot patching
+#reset_ak;
+
+# vendor_boot install
+#dump_boot; # use split_boot to skip ramdisk unpack, e.g. for dtb on devices with hdr v4 but no vendor_kernel_boot
+
+#write_boot; # use flash_boot to skip ramdisk repack, e.g. for dtb on devices with hdr v4 but no vendor_kernel_boot
+## end vendor_boot install
+ANYKERNEL_EOF
+
+          sed -i 's/^supported\.versions=.*/supported.versions=16/' anykernel.sh
 
           FINAL_LOCALVER="${{ env.KERNEL_NAME_STRING }}"
           FINAL_LOCALVER=$(echo "$FINAL_LOCALVER" | sed 's/^-//')
-          sed -i -E 's/^(kernel\.string=).*/\1'"$FINAL_LOCALVER"'/' anykernel.sh
+          sed -i -E "s/^(kernel\.string=).*/\1Starfield-Kernel ${FINAL_LOCALVER}/" anykernel.sh
 
           TIMESTAMP=$(date +'%Y%m%d')
           ZIP_NAME="tama_apollo-${{ env.KERNEL_VERSION }}${{ env.KERNEL_NAME_STRING }}-${TIMESTAMP}.zip"
