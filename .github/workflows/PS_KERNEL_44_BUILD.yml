@@ -1,4 +1,4 @@
-name: 🛠️ SAN KERNEL XZ2/XZ3 4.9
+Name: 🛠️ SAN KERNEL SONY XZ2/XZ3 4.9
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - bpf
-          - test
       DISPLAY_BRANCH_NAME:
         description: '🏷️ Display Branch Name'
         required: true
@@ -40,16 +39,6 @@ on:
         required: true
         default: apollo
         type: string
-      QTI_HAPTICS:
-        description: '📳 Include QTI Haptics Support'
-        required: true
-        default: false
-        type: boolean
-      BUILD_NEWCAM:
-        description: '📷 Use Newcam Build'
-        required: true
-        default: false
-        type: boolean
       INJECT_KSU:
         description: '🦊 Inject KernelSU'
         required: true
@@ -63,7 +52,7 @@ env:
   ARCH: arm64
   SUBARCH: arm64
   KERNEL_URL: https://github.com/imarsya991-gif/Kernel_SonyXZ2-3.git
-  DEFCONFIG: tama_apollo_dcm_defconfig
+  DEFCONFIG: tama_apollo_defconfig
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
@@ -83,6 +72,17 @@ jobs:
         run: |
           rm -rf "${{ env.KERNEL_DIR }}"
           git clone --depth=1 -b "${{ inputs.KERNEL_BRANCH }}" "${{ env.KERNEL_URL }}" "${{ env.KERNEL_DIR }}"
+
+      - name: 🔍 Verify Defconfig
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          if [ ! -f "arch/arm64/configs/${{ env.DEFCONFIG }}" ]; then
+            echo "❌ Error: ${{ env.DEFCONFIG }} tidak ditemukan!"
+            ls -la arch/arm64/configs | grep tama || true
+            exit 1
+          fi
+          echo "✅ Defconfig ${{ env.DEFCONFIG }} ditemukan."
+
       - name: 🔠 Configure Kernel Name String
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -107,6 +107,7 @@ jobs:
           fi
           echo "✅ Kernel string set to: $FINAL_LOCAL"
           echo "KERNEL_NAME_STRING=$FINAL_LOCAL" >> $GITHUB_ENV
+
       - name: 📖 Read Kernel Version
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -116,6 +117,7 @@ jobs:
           FULL_KVER="${KVER_MAJOR}.${KVER_PATCH}.${KVER_SUB}"
           echo "KERNEL_VERSION=$FULL_KVER" >> $GITHUB_ENV
           echo "✅ Detected Kernel Version: $FULL_KVER"
+
       - name: 📦 Install Build Dependencies
         timeout-minutes: 10
         env:
@@ -133,10 +135,12 @@ jobs:
           sudo apt-get install -yq --no-install-recommends \
             -o Acquire::Retries=3 \
             bc bison libssl-dev libelf-dev build-essential python3 python3-pip curl git zip unzip wget ccache libncurses-dev rsync gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi xz-utils
+
       - name: ⚡ Setup Compiler Cache
         run: |
           ccache --max-size=2G
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
       - name: 💾 Restore Compiler Cache
         uses: actions/cache@v4
         with:
@@ -144,6 +148,7 @@ jobs:
           key: ccache-eas-${{ env.DEFCONFIG }}-${{ github.run_id }}
           restore-keys: |
             ccache-eas-${{ env.DEFCONFIG }}-
+
       - name: 🦊 Setup KernelSU
         if: ${{ inputs.INJECT_KSU == true }}
         working-directory: ${{ env.KERNEL_DIR }}
@@ -158,6 +163,7 @@ jobs:
           fi
           echo "KSU_LINK=$KSU_URL" >> $GITHUB_ENV
           echo "✅ KernelSU Link: $KSU_URL"
+
       - name: 🧰 Restore ZyC Clang Cache
         id: clang-cache
         uses: actions/cache@v4
@@ -187,19 +193,17 @@ jobs:
             fi
           fi
           echo "CLANG_VERSION=ZyC Clang 15.0.7" >> $GITHUB_ENV
+
       - name: 🛠️ Fix Resource Errors
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          [ -f kernel/sched/sched.h ] && sed -i 's/cpu_rq(cpu)->cfs->cumulative_runnable_avg/cpu_rq(cpu)->cfs.cumulative_runnable_avg/g' kernel/sched/sched.h
+          [ -f kernel/sched/sched.h ] && sed -i 's/cpu_rq(cpu)->cfs->cumulative_runnable_avg/cpu_rq(cpu)->cfs.cumulative_runnable_avg/g' kernel/sched/sched.h || true
+
       - name: 📢 Telegram Notification - Build Started
         run: |
-          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
-            CAM_TYPE="newcam"
-          else
-            CAM_TYPE="oldcam"
-          fi
-          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}")
+          MESSAGE=$(printf '🛠️ <b>BUILD STARTED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "${{ inputs.INJECT_KSU }}")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendMessage" --data-urlencode chat_id="${{ secrets.CHAT_ID }}" --data-urlencode parse_mode="HTML" --data-urlencode text="$MESSAGE"
+
       - name: ⚙️ Generate Defconfig
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
@@ -209,18 +213,20 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- ${{ env.DEFCONFIG }}
+
       - name: 📝 Configure Configs
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           export PATH="$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
           enable_config() { ./scripts/config --file "$OUT_DIR/.config" --enable "$1"; }
           disable_config() { ./scripts/config --file "$OUT_DIR/.config" --disable "$1"; }
-          set_config() { ./scripts/config --file "$OUT_DIR/.config" --set-val "$1" "$2"; }
           set_str() { ./scripts/config --file "$OUT_DIR/.config" --set-str "$1" "$2"; }
+
           set_str CONFIG_DEFAULT_HOSTNAME "${{ inputs.DEFAULT_HOSTNAME }}"
           set_str CONFIG_LOCALVERSION "${{ env.KERNEL_NAME_STRING }}"
+
           if [ "${{ inputs.LOCALVERSION_AUTO }}" == "true" ]; then
-            echo "🔧 Enabling CONFIG_LOCALVERSION_AUTO (clean mode)..."
+            echo "🔧 Enabling CONFIG_LOCALVERSION_AUTO..."
             enable_config CONFIG_LOCALVERSION_AUTO
             if [ -d ".git" ]; then
               git config --global --add safe.directory "$PWD"
@@ -229,35 +235,37 @@ jobs:
           else
             disable_config CONFIG_LOCALVERSION_AUTO
           fi
-          disable_config CONFIG_KERNEL_XZ
-          disable_config CONFIG_RD_XZ
+
+          # Pakai GZIP dan Matikan XZ
           enable_config CONFIG_KERNEL_GZIP
           enable_config CONFIG_RD_GZIP
-          sed -i 's/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.xz-dtb"/CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME="Image.gz-dtb"/g' "$OUT_DIR/.config"
-          if [ "${{ inputs.QTI_HAPTICS }}" == "true" ]; then
-            echo "📳 Enabling QTI Haptics support..."
-            enable_config CONFIG_INPUT_QTI_HAPTICS
-          fi
-          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
-            echo "📷 Enabling Newcam support..."
-            enable_config CONFIG_XIAOMI_NEW_CAMERA_BLOBS
-          fi
+          disable_config CONFIG_KERNEL_XZ
+          disable_config CONFIG_RD_XZ
+
+          # Dukungan Appended DTB untuk Output Image.gz-dtb
+          enable_config CONFIG_ARM64_APPENDED_DTB
+          enable_config CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE
+          set_str CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME "Image.gz-dtb"
+
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
             echo "🦊 Applying KernelSU configuration..."
             enable_config CONFIG_KSU
             enable_config CONFIG_KSU_TAMPER_SYSCALL_TABLE
           fi
+
           make O=$OUT_DIR ARCH=${{ env.ARCH }} \
             CC="$GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- olddefconfig
+
       - name: 🏗️ Start Kernel Build
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           export PATH="/usr/lib/ccache:$GITHUB_WORKSPACE/$CLANG_DIR/bin:$PATH"
           export KBUILD_BUILD_USER="${{ inputs.BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ inputs.BUILD_HOST }}"
+
           make -j$(nproc --all) O=$OUT_DIR ARCH=${{ env.ARCH }} \
             CC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
             HOSTCC="ccache $GITHUB_WORKSPACE/$CLANG_DIR/bin/clang" \
@@ -270,83 +278,86 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-Wno-address -Wno-implicit-function-declaration" 2>&1 | tee build.log
-          if [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.gz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz-dtb" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image.xz" ] && [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
-            echo "❌ Kernel file not found!"
-            exit 1
-          fi
-          echo "✅ Kernel file successfully created."
-      - name: 🔍 Create Kernel Zip (Gzip Format)
+            KCFLAGS="-Wno-address -Wno-implicit-function-declaration" Image.gz-dtb 2>&1 | tee build.log
+
+      - name: 🔍 Create Kernel Zip (Image.gz-dtb Format)
         id: img
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
-          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.gz-dtb" -o -name "Image.gz" -o -name "Image.xz-dtb" -o -name "Image.xz" -o -name "Image" \) | head -n1)
+          # Cari file Image.gz-dtb
+          IMAGE=$(find "$PWD/$OUT_DIR/arch/arm64/boot" -type f \( -name "Image.gz-dtb" -o -name "Image.gz" \) | head -n1)
+
           if [ -z "$IMAGE" ]; then
             echo "❌ Kernel file not found!"
             exit 1
           fi
-          echo "📄 Found: $(basename "$IMAGE")"
-          if [[ "$IMAGE" == *"dtb"* ]]; then
-            OUTPUT_NAME="Image.gz-dtb"
-          else
-            OUTPUT_NAME="Image.gz"
-          fi
-          if [[ "$IMAGE" == *.gz ]]; then
+
+          OUTPUT_NAME="Image.gz-dtb"
+
+          # Fallback manual jika Makefile hanya menghasilkan Image.gz biasa
+          if [[ "$IMAGE" == *"Image.gz-dtb"* ]]; then
             cp "$IMAGE" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
-            echo "✅ File format is already .gz"
+            echo "✅ Direct Image.gz-dtb copied."
           else
-            echo "🗜️ Compressing kernel to .gz format..."
-            gzip -c "$IMAGE" > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
-            echo "✅ Compression completed: $OUTPUT_NAME"
+            DTB_FILE=$(find "$PWD/$OUT_DIR/arch/arm64/boot/dts" -type f -name "*.dtb" | head -n1)
+            if [ -n "$DTB_FILE" ]; then
+              echo "🔀 Appending DTB to Image.gz manually..."
+              cat "$IMAGE" "$DTB_FILE" > "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+            else
+              cp "$IMAGE" "$GITHUB_WORKSPACE/$OUTPUT_NAME"
+            fi
           fi
+
           cd "$GITHUB_WORKSPACE"
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
           cp "$GITHUB_WORKSPACE/$OUTPUT_NAME" AnyKernel3/
+
           cd AnyKernel3
-          echo "IyMjIEFueUtlcm5lbDMgUmFtZGlzayBNb2QgU2NyaXB0CiMjIG9zbTBzaXMgQCB4ZGEtZGV2ZWxvcGVycwoKIyMjIEFueUtlcm5lbCBzZXR1cAojIGdsb2JhbCBwcm9wZXJ0aWVzCnByb3BlcnRpZXMoKSB7ICcKa2VybmVsLnN0cmluZz1TdGFyZmllbGQtS2VybmVsCmRvLmRldmljZWNoZWNrPTEKZG8ubW9kdWxlcz0wCmRvLnN5c3RlbWxlc3M9MQpkby5jbGVhbnVwPTEKZG8uY2xlYW51cG9uYWJvcnQ9MApkZXZpY2UubmFtZTE9YXBvbGxvCmRldmljZS5uYW1lMj1hcG9sbG9fa2RkaQpkZXZpY2UubmFtZTM9eHoyYwpkZXZpY2UubmFtZTQ9eHoyY19rZGRpCmRldmljZS5uYW1lNT14ejJjX2RjbQpzdXBwb3J0ZWQudmVyc2lvbnM9CnN1cHBvcnRlZC5wYXRjaGxldmVscz0Kc3VwcG9ydGVkLnZlbmRvcnBhdGNobGV2ZWxzPQonOyB9ICMgZW5kIHByb3BlcnRpZXMKCgojIyMgQW55S2VybmVsIGluc3RhbGwKIyMgYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCmJvb3RfYXR0cmlidXRlcygpIHsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CnNldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwp9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgYm9vdCBzaGVsbCB2YXJpYWJsZXMKQkxPQ0s9Ym9vdDsKSVNfU0xPVF9ERVZJQ0U9MTsKUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwpQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyBpbXBvcnQgZnVuY3Rpb25zL3ZhcmlhYmxlcyBhbmQgc2V0dXAgcGF0Y2hpbmcgLSBzZWUgZm9yIHJlZmVyZW5jZSAoRE8gTk9UIFJFTU9WRSkKLiB0b29scy9hazMtY29yZS5zaDsKCiMgYm9vdCBpbnN0YWxsCmR1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2skCndyaXRlX2Jvb3Q7ICMgdXNlIGZsYXNoX2Jvb3QgdG8gc2tpcCByYW1kaXNrIHJlcGFjaywgZS5nLiBmb3IgZGV2aWNlcyB3aXRoIGluaXRfYm9vdCByYW1kaXNrCiMjIGVuZCBib290IGluc3RhbGwKCgojIyBpbml0X2Jvb3QgZmlsZXMgYXR0cmlidXRlcwojaW5pdF9ib290X2F0dHJpYnV0ZXMoKSB7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJFJBTURJU0svKjsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwojfSAjIGVuZCBhdHRyaWJ1dGVzCgojIGluaXRfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPWluaXRfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgaW5pdF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgaW5pdF9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1bnBhY2sgcmFtZGlzayBzaW5jZSBpdCBpcyB0aGUgbmV3IGZpcnN0IHN0YWdlIGluaXQgcmFtZGlzayB3aGVyZSBvdmVybGF5LmQgbXVzdCBnbwoKI3dyaXRlX2Jvb3Q7CiMjIGVuZCBpbml0X2Jvb3QgaW5zdGFsbAoKCiMjIHZlbmRvcl9rZXJuZWxfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9rZXJuZWxfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgdmVuZG9yX2tlcm5lbF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKI3NwbGl0X2Jvb3Q7ICMgc2tpcCB1bnBhY2svcmVwYWNrIHJhbWRpc2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGFuZCB2ZW5kb3Jfa2VybmVsX2Jvb3QKCiNmbGFzaF9ib290OwojIyBlbmQgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKCgojIyB2ZW5kb3JfYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCiN2ZW5kb3JfYm9vdF9hdHRyaWJ1dGVzKCkgewojc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1MCA3NTAgJFJBTURJU0svaW5pdCogJFJBTURJU0svc2JpbjsKI30gIyBlbmQgYXR0cmlidXRlcwoKIyB2ZW5kb3JfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciB2ZW5kb3JfYm9vdCBwYXRjaGluZwojcmVzZXRfYWs7CgojIHZlbmRvcl9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290Cgojd3JpdGVfYm9vdDsgIyB1c2UgZmxhc2hfYm9vdCB0byBza2lwIHJhbWRpc2sgcmVwYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290CiMjIGVuZCB2ZW5kb3JfYm9vdCBpbnN0YWxsCg==" | base64 -d > anykernel.sh
+          echo "IyMjIEFueUtlcm5lbDMgUmFtZGlzayBNb2QgU2NyaXB0CiMjIG9zbTBzaXMgQCB4ZGEtZGV2ZWxvcGVycwoKIyMjIEFueUtlcm5lbCBzZXR1cAojIGdsb2JhbCBwcm9wZXJ0aWVzCnByb3BlcnRpZXMoKSB7ICcKa2VybmVsLnN0cmluZz1TdGFyZmllbGQtS2VybmVsCmRvLmRldmljZWNoZWNrPTEKZG8ubW9kdWxlcz0wCmRvLnN5c3RlbWxlc3M9MQpkby5jbGVhbnVwPTEKZG8uY2xlYW51cG9uYWJvcnQ9MApkZXZpY2UubmFtZTE9YXBvbGxvCmRldmljZS5uYW1lMj1hcG9sbG9fa2RkaQpkZXZpY2UubmFtZTM9eHoyYwpkZXZpY2UubmFtZTQ9eHoyY19rZGRpCmRldmljZS5uYW1lNT14ejJjX2RjbQpzdXBwb3J0ZWQudmVyc2lvbnM9CnN1cHBvcnRlZC5wYXRjaGxldmVscz0Kc3VwcG9ydGVkLnZlbmRvcnBhdGNobGV2ZWxzPQonOyB9ICMgZW5kIHByb3BlcnRpZXMKCgojIyMgQW55S2VybmVsIGluc3RhbGwKIyMgYm9vdCBmaWxlcyBhdHRyaWJ1dGVzCmJvb3RfYXR0cmlidXRlcygpIHsKc2V0X3Blcm1fcmVjdXJzaXZlIDAgMCA3NTUgNjQ0ICRSQU1ESVNLLyo7CnNldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwp9ICMgZW5kIGF0dHJpYnV0ZXMKCiMgYm9vdCBzaGVsbCB2YXJpYWJsZXMKQkxPQ0s9Ym9vdDsKSVNfU0xPVF9ERVZJQ0U9MTsKUkFNRElTS19DT01QUkVTU0lPTj1hdXRvOwpQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyBpbXBvcnQgZnVuY3Rpb25zL3ZhcmlhYmxlcyBhbmQgc2V0dXAgcGF0Y2hpbmcgLSBzZWUgZm9yIHJlZmVyZW5jZSAoRE8gTk9UIFJFTU9WRSkKLiB0b29scy9hazMtY29yZS5zaDsKCiMgYm9vdCBpbnN0YWxsCmR1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkZXZpY2VzIHdpdGggaW5pdF9ib290IHJhbWRpc2skCndyaXRlX2Jvb3Q7ICMgdXNlIGZsYXNoX2Jvb3QgdG8gc2tpcCByYW1kaXNrIHJlcGFjaywgZS5nLiBmb3IgZGV2aWNlcyB3aXRoIGluaXRfYm9vdCByYW1kaXNrCiMjIGVuZCBib290IGluc3RhbGwKCgojIyBpbml0X2Jvb3QgZmlsZXMgYXR0cmlidXRlcwojaW5pdF9ib290X2F0dHJpYnV0ZXMoKSB7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1NSA2NDQgJFJBTURJU0svKjsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUwIDc1MCAkUkFNRElTSy9pbml0KiAkUkFNRElTSy9zYmluOwojfSAjIGVuZCBhdHRyaWJ1dGVzCgojIGluaXRfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPWluaXRfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgaW5pdF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgaW5pdF9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1bnBhY2sgcmFtZGlzayBzaW5jZSBpdCBpcyB0aGUgbmV3IGZpcnN0IHN0YWdlIGluaXQgcmFtZGlzayB3aGVyZSBvdmVybGF5LmQgbXVzdCBnbwoKI3dyaXRlX2Jvb3Q7CiMjIGVuZCBpbml0X2Jvb3QgaW5zdGFsbAoKCiMjIHZlbmRvcl9rZXJuZWxfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9rZXJuZWxfYm9vdDsKI0lTX1NMT1RfREVWSUNFPTE7CiNSQU1ESVNLX0NPTVBSRVNTSU9OPWF1dG87CiNQQVRDSF9WQk1FVEFfRkxBRz1hdXRvOwoKIyByZXNldCBmb3IgdmVuZG9yX2tlcm5lbF9ib290IHBhdGNoaW5nCiNyZXNldF9hazsKCiMgdmVuZG9yX2tlcm5lbF9ib290IGluc3RhbGwKI3NwbGl0X2Jvb3Q7ICMgc2tpcCB1bnBhY2svcmVwYWNrIHJhbWRpc2ssIGUuZy4gZm9yIGR0YiBvbiBkZXZpY2VzIHdpdGggaGRyIHY0IGFuZCB2ZW5kb3JfYm9vdAKKI2ZsYXNoX2Jvb3Q7CiMjIGVuZCB2ZW5kb3JfYm9vdCBpbnN0YWxsCgoKIyMgdmVuZG9yX2Jvb3QgZmlsZXMgYXR0cmlidXRlcwojdmVuZG9yX2Jvb3RfYXR0cmlidXRlcygpIHsKI3NldF9wZXJtX3JlY3Vyc2l2ZSAwIDAgNzUgNjQ0ICRSQU1ESVNLLyo7CiNzZXRfcGVybV9yZWN1cnNpdmUgMCAwIDc1MCA3NTAgJFJBTURJU0svaW5pdCogJFJBTURJU0svc2JpbjsKI30gIyBlbmQgYXR0cmlidXRlcwoKIyB2ZW5kb3JfYm9vdCBzaGVsbCB2YXJpYWJsZXMKI0JMT0NLPXZlbmRvcl9ib290OwojSVNfU0xPVF9ERVZJQ0U9MTsKI1JBTURJU0tfQ09NUFJFU1NJT049YXV0bzsKI1BBVENIX1ZCTUVUQV9GTEFHPWF1dG87CgojIHJlc2V0IGZvciB2ZW5kb3JfYm9vdCBwYXRjaGluZwojcmVzZXRfYWs7CgojIHZlbmRvcl9ib290IGluc3RhbGwKI2R1bXBfYm9vdDsgIyB1c2Ugc3BsaXRfYm9vdCB0byBza2lwIHJhbWRpc2sgdW5wYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290Cgojd3JpdGVfYm9vdDsgIyB1c2UgZmxhc2hfYm9vdCB0byBza2lwIHJhbWRpc2sgcmVwYWNrLCBlLmcuIGZvciBkdGIgb24gZGV2aWNlcyB3aXRoIGhkciB2NCBidXQgbm8gdmVuZG9yX2tlcm5lbF9ib290CiMjIGVuZCB2ZW5kb3JfYm9vdCBpbnN0YWxsCg==" | base64 -d > anykernel.sh
+
           sed -i 's/^supported\.versions=.*/supported.versions=16/' anykernel.sh
+
           FINAL_LOCALVER="${{ env.KERNEL_NAME_STRING }}"
           FINAL_LOCALVER=$(echo "$FINAL_LOCALVER" | sed 's/^-//')
           sed -i -E "s/^(kernel\.string=).*/\1Starfield-Kernel ${FINAL_LOCALVER}/" anykernel.sh
+
           TIMESTAMP=$(date +'%Y%m%d')
           ZIP_NAME="tama_apollo-${{ env.KERNEL_VERSION }}${{ env.KERNEL_NAME_STRING }}-${TIMESTAMP}.zip"
           zip -r9 "$ZIP_NAME" * -x ".git/*"
+
           echo "zip_path=$GITHUB_WORKSPACE/AnyKernel3/$ZIP_NAME" >> "$GITHUB_OUTPUT"
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
       - name: ✅ Telegram Notification - Build Success
         if: success()
         run: |
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - ${{ env.BUILD_START_TIME }}))
           DURATION_STR="$((DURATION / 60))m $((DURATION % 60))s"
-          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
-            CAM_TYPE="newcam"
-          else
-            CAM_TYPE="oldcam"
-          fi
+
           if [ "${{ inputs.INJECT_KSU }}" == "true" ]; then
             KSU_TEXT="true (<a href=\"${{ env.KSU_LINK }}\">link</a>)"
           else
             KSU_TEXT="false"
           fi
-          MESSAGE=$(printf '✅ <b>BUILD SUCCESS</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> %s\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "$KSU_TEXT" "$DURATION_STR")
+
+          MESSAGE=$(printf '✅ <b>BUILD SUCCESS</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n🦊 <b>KSU Injection:</b> %s\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$KSU_TEXT" "$DURATION_STR")
+
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
             -F chat_id="${{ secrets.CHAT_ID }}" \
             -F document="@${{ steps.img.outputs.zip_path }}" \
             -F parse_mode="HTML" \
             -F caption="$MESSAGE"
+
       - name: ❌ Telegram Notification - Build Failed
         if: failure()
         run: |
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - ${{ env.BUILD_START_TIME }}))
           DURATION_STR="$((DURATION / 60))m $((DURATION % 60))s"
-          if [ "${{ inputs.BUILD_NEWCAM }}" == "true" ]; then
-            CAM_TYPE="newcam"
-          else
-            CAM_TYPE="oldcam"
-          fi
-          MESSAGE=$(printf '❌ <b>BUILD FAILED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama_apollo)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n📷 <b>Build Type:</b> <code>%s</code>\n📳 <b>QTI Haptics Support:</b> <code>%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>\n\n💥 <i>Check the build.log file above for error details.</i>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "$CAM_TYPE" "${{ inputs.QTI_HAPTICS }}" "${{ inputs.INJECT_KSU }}" "$DURATION_STR")
+
+          MESSAGE=$(printf '❌ <b>BUILD FAILED</b>\n\n📱 <b>Device:</b> <code>Sony XZ2/XZ3 (tama)</code>\n🏷️ <b>Kernel Name:</b> <code>%s%s</code>\n🦊 <b>KSU Injection:</b> <code>%s</code>\n🛠️ <b>Clang Version:</b> <code>ZyC Clang 15.0.7</code>\n⏱️ <b>Time Elapsed:</b> <code>%s</code>\n\n💥 <i>Check the build.log file above for error details.</i>' "${{ env.KERNEL_VERSION }}" "${{ env.KERNEL_NAME_STRING }}" "${{ inputs.INJECT_KSU }}" "$DURATION_STR")
+
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_API }}/sendDocument" \
             -F chat_id="${{ secrets.CHAT_ID }}" \
             -F document="@${{ env.KERNEL_DIR }}/build.log" \
